@@ -2987,6 +2987,14 @@ class LibvirtDriver(driver.ComputeDriver):
 
         guest.cpu = self.get_guest_cpu_config()
 
+        if (image_meta is not None and image_meta.get('properties') and
+            image_meta['properties'].get('hw_vcpus_as_cores') is not None):
+                allocate_as_cores = image_meta['properties']['hw_vcpus_as_cores'].lower() in ('yes', '1', 'true')
+                if allocate_as_cores:
+                    guest.cpu.sockets = 1
+                    guest.cpu.cores = guest.vcpus
+                    guest.cpu.threads = 1
+
         if 'root' in disk_mapping:
             root_device_name = block_device.prepend_dev(
                 disk_mapping['root']['dev'])

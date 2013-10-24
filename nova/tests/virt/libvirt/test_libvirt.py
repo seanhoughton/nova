@@ -1117,6 +1117,22 @@ class LibvirtConnTestCase(test.TestCase):
         self.assertEqual(cfg.devices[4].type, "tablet")
         self.assertEqual(cfg.devices[5].type, "vnc")
 
+    def test_get_guest_config_with_core_vpus(self):
+        self.flags(libvirt_type='kvm')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+
+        flavor = flavors.create('m1.lots_of_cpus', 1024, 8, 5)
+        self.test_instance['instance_type_id'] = flavor['id']
+        instance_ref = db.instance_create(self.context, self.test_instance)
+
+        disk_info = blockinfo.get_disk_info(CONF.libvirt_type, instance_ref)
+        image_meta = {"properties": {"hw_vcpus_as_cores": "yes"}}
+        cfg = conn.get_guest_config(instance_ref, [], image_meta, disk_info)
+        self.assertEqual(cfg.cpu.sockets, 1)
+        self.assertEqual(cfg.cpu.cores, 8)
+        self.assertEqual(cfg.cpu.threads, 1)
+
     def _create_fake_service_compute(self):
         service_info = {
             'host': 'fake',
