@@ -1047,7 +1047,10 @@ class ComputeManager(manager.Manager):
             raise exception.BuildAbortException(
                 instance_uuid=instance['uuid'],
                 reason=msg)
-        except exception.UnexpectedTaskStateError as e:
+        except (exception.UnexpectedTaskStateError,
+                exception.InstanceTypeTooManyVcpus,
+                exception.InvalidImageProperty,
+                exception.NoValidVcpuTopology) as e:
             # Don't try to reschedule, just log and reraise.
             with excutils.save_and_reraise_exception():
                 LOG.debug(e.format_message(), instance=instance)

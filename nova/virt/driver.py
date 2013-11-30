@@ -26,6 +26,7 @@ import sys
 
 from oslo.config import cfg
 
+from nova import exception
 from nova.openstack.common.gettextutils import _
 from nova.openstack.common import importutils
 from nova.openstack.common import log as logging
@@ -1098,6 +1099,118 @@ class ComputeDriver(object):
                                           *block_device_lists):
         """Default the missing device names in the block device mapping."""
         raise NotImplementedError()
+
+    def get_guest_cpu_topology(self, inst_type, image_meta, preferred_topology,
+                               mandatory_topology):
+        """
+        Calculate the list of all possible valid topologies for configuring
+        guest machine CPU topology within the given constraints. The caller
+        should choose one element from the returned list to use as the
+        topology. The returned list will be ordered such that it prefers
+        sockets, over cores, over threads.
+
+        :param inst_type: Object returned from a
+               self.virtapi.instance_type_get() call. Used to determine max
+               vCPU count.
+        :param image_meta: The metadata dict for the root disk image.
+        :param preferred_topology: Dict containing three keys: max_sockets,
+               max_cores, max_threads, where max_cores means max cores per
+               socket, max_threads means max threads per core.
+        :param mandatory_topology: Dict containing three keys: max_sockets,
+               max_cores, max_threads, where max_cores means max cores per
+               socket, max_threads means max threads per core. Note that the
+               elements in mandatory topology _MUST_ be more than or equal to
+               the one in preferred topology.
+
+        Returns list of dicts. Each dict containing three keys: sockets, cores,
+        threads.
+        """
+        total_vcpus = inst_type['vcpus']
+
+        # Check the mandatory topology has enough vCPUs or not
+        max_supported_vcpus = (mandatory_topology['max_sockets'] *
+                               mandatory_topology['max_cores'] *
+                               mandatory_topology['max_threads'])
+        if max_supported_vcpus < total_vcpus:
+            raise exception.InstanceTypeTooManyVcpus()
+
+        topology_config = self._parse_topology_config(image_meta)
+        # Padding the blank topology setting in image property with mandatory
+        # topology.
+        for key in ('max_sockets', 'max_cores', 'max_threads'):
+            if topology_config[key] is None:
+                topology_config[key] = mandatory_topology[key]
+
+        hard_limit_sockets = min(topology_config['max_sockets'],
+                                 max(preferred_topology['max_sockets'],
+                                     mandatory_topology['max_sockets']))
+        hard_limit_cores = min(topology_config['max_cores'],
+                               max(preferred_topology['max_cores'],
+                                   mandatory_topology['max_cores']))
+        hard_limit_threads = min(topology_config['max_threads'],
+                                 max(preferred_topology['max_threads'],
+                                     mandatory_topology['max_threads']))
+
+        # Calculate the preferred topologies
+        preferred_cpu_topologies = []
+        max_preferred_sockets = min(hard_limit_sockets,
+                                    preferred_topology['max_sockets'],
+                                    total_vcpus)
+        max_preferred_cores = min(hard_limit_cores,
+                                  preferred_topology['max_cores'],
+                                  total_vcpus)
+        max_preferred_threads = min(hard_limit_threads,
+                                    preferred_topology['max_threads'],
+                                    total_vcpus)
+        for threads in range(1, max_preferred_threads + 1):
+            for cores in range(1, max_preferred_cores + 1):
+                for sockets in range(1, max_preferred_sockets + 1):
+                    if sockets * cores * threads == total_vcpus:
+                        preferred_cpu_topologies.append(dict(sockets=sockets,
+                                                             cores=cores,
+                                                             threads=threads))
+
+        if len(preferred_cpu_topologies) > 0:
+            return preferred_cpu_topologies
+
+        # Calculate the usable topologies
+        usable_cpu_topologies = []
+        all_usable_sockets = min(hard_limit_sockets, total_vcpus)
+        all_usable_cores = min(hard_limit_cores, total_vcpus)
+        all_usable_threads = min(hard_limit_threads, total_vcpus)
+        for threads in range(1, all_usable_threads + 1):
+            for cores in range(1, all_usable_cores + 1):
+                for sockets in range(1, all_usable_sockets + 1):
+                    if sockets * cores * threads == total_vcpus:
+                        usable_cpu_topologies.append(dict(sockets=sockets,
+                                                          cores=cores,
+                                                          threads=threads))
+
+        return usable_cpu_topologies
+
+    def _parse_topology_config(self, image_meta):
+        topology = {'max_sockets': None, 'max_cores': None,
+                    'max_threads': None}
+
+        if (image_meta is not None and image_meta.get('properties') and
+                image_meta['properties'].get('hw_cpu_topology')
+                is not None):
+            hw_cpu_topology = image_meta['properties']['hw_cpu_topology']
+            try:
+                for top in hw_cpu_topology.split(','):
+                    key, value = top.split('=')
+                    key = key.strip()
+                    if key in topology and int(value) > 0:
+                        topology[key] = int(value)
+                        if key == 'max_threads' and topology[key] > 2:
+                            raise ValueError('max_threads')
+                    else:
+                        raise ValueError(top)
+            except (TypeError, ValueError) as e:
+                property = {'hw_cpu_topology': hw_cpu_topology}
+                raise exception.InvalidImageProperty(property=property)
+
+        return topology
 
 
 def load_compute_driver(virtapi, compute_driver=None):

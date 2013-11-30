@@ -1485,3 +1485,15 @@ class PciDeviceUnsupportedHypervisor(NovaException):
 
 class KeyManagerError(NovaException):
     msg_fmt = _("key manager error: %(reason)s")
+
+
+class InstanceTypeTooManyVcpus(NovaException):
+    msg_fmt = _("Instance type's vcpus is too many for requested hypervisor.")
+
+
+class InvalidImageProperty(Invalid):
+    msg_fmt = _("Invalid image property %(property)s.")
+
+
+class NoValidVcpuTopology(NovaException):
+    msg_fmt = _("No valid vcpu topology was found. %(reason)s")

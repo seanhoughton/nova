@@ -1228,7 +1228,9 @@ class LibvirtConnTestCase(test.TestCase):
         conf = conn.get_guest_config(instance_ref,
                                      _fake_network_info(self.stubs, 1),
                                      None, disk_info)
-        self.assertIsNone(conf.cpu)
+        self.assertEqual(vconfig.LibvirtConfigGuestCPU, type(conf.cpu))
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
 
     def test_get_guest_cpu_config_default_kvm(self):
         self.flags(virt_type="kvm",
@@ -1267,7 +1269,9 @@ class LibvirtConnTestCase(test.TestCase):
         conf = conn.get_guest_config(instance_ref,
                                      _fake_network_info(self.stubs, 1),
                                      None, disk_info)
-        self.assertIsNone(conf.cpu)
+        self.assertEqual(vconfig.LibvirtConfigGuestCPU, type(conf.cpu))
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
 
     def test_get_guest_cpu_config_default_lxc(self):
         self.flags(virt_type="lxc",
@@ -1282,7 +1286,9 @@ class LibvirtConnTestCase(test.TestCase):
         conf = conn.get_guest_config(instance_ref,
                                      _fake_network_info(self.stubs, 1),
                                      None, disk_info)
-        self.assertIsNone(conf.cpu)
+        self.assertEqual(vconfig.LibvirtConfigGuestCPU, type(conf.cpu))
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
 
     def test_get_guest_cpu_config_host_passthrough_new(self):
         def get_lib_version_stub():
@@ -1433,6 +1439,109 @@ class LibvirtConnTestCase(test.TestCase):
                          vconfig.LibvirtConfigGuestCPU)
         self.assertIsNone(conf.cpu.mode)
         self.assertEqual(conf.cpu.model, "Penryn")
+
+    def test_get_guest_cpu_topology_config_no_model_no_topology(self):
+        self.flags(cpu_mode='none', group='libvirt')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+        instance_ref = db.instance_create(self.context, self.test_instance)
+        disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
+                                            instance_ref)
+        image_meta = {"properties": {}}
+        conf = conn.get_guest_config(instance_ref, [], image_meta, disk_info)
+
+        inst_type = db.flavor_get(self.context,
+                instance_ref['instance_type_id'])
+
+        self.assertEqual(type(conf.cpu), vconfig.LibvirtConfigGuestCPU)
+
+        self.assertEqual(inst_type['vcpus'], conf.cpu.sockets)
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
+
+    def test_get_guest_cpu_topology_config_no_model_with_error_top(self):
+        # test for empty hw_cpu_topology property
+        self.flags(cpu_mode='none', group='libvirt')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+        instance_ref = db.instance_create(self.context, self.test_instance)
+        disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
+                                            instance_ref)
+        image_meta = {"properties": {"hw_cpu_topology": ""}}
+        self.assertRaises(exception.InvalidImageProperty,
+                          conn.get_guest_config,
+                          instance_ref, [], image_meta, disk_info)
+
+        image_meta = {"properties": {"hw_cpu_topology": "max_socket=1"}}
+        self.assertRaises(exception.InvalidImageProperty,
+                          conn.get_guest_config,
+                          instance_ref, [], image_meta, disk_info)
+
+    def test_get_guest_cpu_topology_config_no_model_with_default_sockets(self):
+        # test for default value of max sockets
+        self.flags(virt_type='kvm', group='libvirt')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+        instance_ref = db.instance_create(self.context, self.test_instance)
+        disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
+                                            instance_ref)
+        image_meta = {"properties": {"hw_cpu_topology": "max_threads=1"}}
+        conf = conn.get_guest_config(instance_ref, [], image_meta, disk_info)
+
+        inst_type = db.flavor_get(self.context,
+                instance_ref['instance_type_id'])
+
+        self.assertEqual(type(conf.cpu), vconfig.LibvirtConfigGuestCPU)
+
+        self.assertEqual(inst_type['vcpus'], conf.cpu.sockets)
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
+
+    def test_get_guest_cpu_topology_config_no_model_with_topology(self):
+        self.flags(cpu_mode='none', group='libvirt')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+        instance_ref = db.instance_create(self.context, self.test_instance)
+
+        disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
+                                            instance_ref)
+        image_meta = {
+                "properties": {
+                    "hw_cpu_topology": "max_threads=2"
+                }
+            }
+        conf = conn.get_guest_config(instance_ref, [], image_meta, disk_info)
+        inst_type = db.flavor_get(self.context,
+                instance_ref['instance_type_id'])
+
+        self.assertEqual(type(conf.cpu), vconfig.LibvirtConfigGuestCPU)
+
+        self.assertEqual(inst_type['vcpus'], conf.cpu.sockets)
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
+
+    def test_get_guest_cpu_topology_config_with_topology(self):
+        self.flags(virt_type='kvm', group='libvirt')
+
+        conn = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), True)
+        instance_ref = db.instance_create(self.context, self.test_instance)
+
+        disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
+                                            instance_ref)
+        image_meta = {
+                "properties": {
+                    "hw_cpu_topology": "max_cores=20,max_threads=2"
+                }
+            }
+        conf = conn.get_guest_config(instance_ref, [], image_meta, disk_info)
+        inst_type = db.flavor_get(self.context,
+                instance_ref['instance_type_id'])
+
+        self.assertEqual(type(conf.cpu), vconfig.LibvirtConfigGuestCPU)
+
+        self.assertEqual(inst_type['vcpus'], conf.cpu.sockets)
+        self.assertEqual(1, conf.cpu.cores)
+        self.assertEqual(1, conf.cpu.threads)
 
     def test_xml_and_uri_no_ramdisk_no_kernel(self):
         instance_data = dict(self.test_instance)

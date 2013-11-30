@@ -688,6 +688,160 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
 
         self.connection.emit_event(event1)
 
+    def test_get_guest_cpu_topology(self):
+        preferred_topology = dict(max_sockets=64, max_cores=4, max_threads=1)
+        mandatory_topology = dict(max_sockets=64, max_cores=8, max_threads=2)
+
+        image_meta = dict(properties=dict())
+        for i in range(1, 7):
+            vcpus = 2 ** i
+            inst_type = dict(vcpus=vcpus)
+            conf = self.connection.get_guest_cpu_topology(inst_type,
+                                                          image_meta,
+                                                          preferred_topology,
+                                                          mandatory_topology)
+
+            self.assertEqual(vcpus, conf[0]['sockets'])
+            self.assertEqual(1, conf[0]['cores'])
+            self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=2)
+        image_meta = dict(properties=dict(hw_cpu_topology='max_sockets=4'))
+
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(2, conf[0]['sockets'])
+        self.assertEqual(1, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=4)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(4, conf[0]['sockets'])
+        self.assertEqual(1, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=8)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(4, conf[0]['sockets'])
+        self.assertEqual(2, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=16)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(4, conf[0]['sockets'])
+        self.assertEqual(4, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=32)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(4, conf[0]['sockets'])
+        self.assertEqual(8, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=64)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(4, conf[0]['sockets'])
+        self.assertEqual(8, conf[0]['cores'])
+        self.assertEqual(2, conf[0]['threads'])
+
+        inst_type = dict(vcpus=3)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(3, conf[0]['sockets'])
+        self.assertEqual(1, conf[0]['cores'])
+        self.assertEqual(1, conf[0]['threads'])
+
+        inst_type = dict(vcpus=128)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(0, len(conf))
+
+        inst_type = dict(vcpus=13)
+        conf = self.connection.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+
+        self.assertEqual(0, len(conf))
+
+        inst_type = dict(vcpus=(mandatory_topology['max_sockets'] *
+                                mandatory_topology['max_cores'] *
+                                mandatory_topology['max_threads'] + 1))
+        self.assertRaises(exception.InstanceTypeTooManyVcpus,
+                          self.connection.get_guest_cpu_topology,
+                          inst_type, image_meta,
+                          preferred_topology,
+                          mandatory_topology)
+
+    def test_parse_topology_config(self):
+        # test for empty property
+        image_meta = {"properties": {}}
+        conf = self.connection._parse_topology_config(image_meta)
+
+        self.assertEqual({'max_sockets': None, 'max_cores': None,
+                          'max_threads': None}, conf)
+
+        # test for empty hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology": ""}}
+        self.assertRaises(exception.InvalidImageProperty,
+                          self.connection._parse_topology_config,
+                          image_meta)
+
+        # test for error hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology": "max_socket=1"}}
+        self.assertRaises(exception.InvalidImageProperty,
+                          self.connection._parse_topology_config,
+                          image_meta)
+
+        # test for error hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology": "max_threads=3"}}
+        self.assertRaises(exception.InvalidImageProperty,
+                          self.connection._parse_topology_config,
+                          image_meta)
+
+        # test for max sockets in hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology": "max_sockets=1"}}
+        conf = self.connection._parse_topology_config(image_meta)
+
+        self.assertEqual({'max_sockets': 1, 'max_cores': None,
+                          'max_threads': None}, conf)
+
+        # test for all in hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology":
+                            "max_sockets=1,max_cores=1,max_threads=1"}}
+        conf = self.connection._parse_topology_config(image_meta)
+
+        self.assertEqual({'max_sockets': 1, 'max_cores': 1,
+                          'max_threads': 1}, conf)
+
+        # test for white space in hw_cpu_topology property
+        image_meta = {"properties": {"hw_cpu_topology":
+                        " max_sockets = 1 , max_cores =1 ,max_threads= 1 "}}
+        conf = self.connection._parse_topology_config(image_meta)
+
+        self.assertEqual({'max_sockets': 1, 'max_cores': 1,
+                          'max_threads': 1}, conf)
+
 
 class AbstractDriverTestCase(_VirtDriverTestCase, test.TestCase):
     def setUp(self):

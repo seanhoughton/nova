@@ -2986,6 +2986,29 @@ class LibvirtDriver(driver.ComputeDriver):
                     setattr(guest, scope[1], value)
 
         guest.cpu = self.get_guest_cpu_config()
+        # Set topology of vcpus
+        if guest.cpu is None:
+            guest.cpu = vconfig.LibvirtConfigGuestCPU()
+
+        # TODO(wangpan): The preferred and mandatory topology should be got
+        #                from libvirt to caculate a high-performance vcpu
+        #                topology, rather than just hard code here.
+        preferred_topology = dict(max_sockets=64, max_cores=4, max_threads=1)
+        mandatory_topology = dict(max_sockets=64, max_cores=8, max_threads=2)
+        vcpu_topologies = self.get_guest_cpu_topology(inst_type, image_meta,
+                                                      preferred_topology,
+                                                      mandatory_topology)
+        if len(vcpu_topologies) == 0:
+            reason = _('May hw_cpu_topology property be inappropriate or the '
+                       'number of vcpus is odd')
+            raise exception.NoValidVcpuTopology(reason=reason)
+
+        # TODO(wangpan): Just using the first topology of returned list, better
+        #                choice method should be added.
+        vcpu_topology = vcpu_topologies[0]
+        guest.cpu.sockets = vcpu_topology['sockets']
+        guest.cpu.cores = vcpu_topology['cores']
+        guest.cpu.threads = vcpu_topology['threads']
 
         if 'root' in disk_mapping:
             root_device_name = block_device.prepend_dev(
